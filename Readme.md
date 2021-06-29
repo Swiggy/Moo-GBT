@@ -161,7 +161,7 @@ constrained_gbt.fit(X_train, y_train_)
 From the constrained model, we achieve a 41% gain in AuROC for the sub-objective while the loss in primary objective AuROC is < 5% at 4.1%.
 The entire study on this dataset can be found in the [example notebook](a)(*** add link).
 
-Looking at MooGBT primary and sub-objective losses - 
+## Looking at MooGBT primary and sub-objective losses - 
 
 To get raw values of loss functions wrt boosting iteration,
 
@@ -255,7 +255,7 @@ At an iteration k, if the constraint t is not satisfied, i.e., Ct(s) > b
 
 ## Public contents
 
-*   [_gb_.py](https://github.com/):
+*   [_gb_.py]():
     contains the `MooGBTClassifier` and `MooGBTRegressor` classes. Contains implementation of the fit and predict function.
 
 *   [_gb_losses_.py]():
@@ -265,7 +265,7 @@ At an iteration k, if the constraint t is not satisfied, i.e., Ct(s) > b
 ## More examples
 
 The
-[examples](https://github.com/)
+[examples]()
 directory contains several illustrations of how one can use this library:
 
 *   [Jupyter](https://jupyter.org/) notebooks:
