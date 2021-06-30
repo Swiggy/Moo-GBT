@@ -31,6 +31,8 @@ Moo-GBT can be installed from **[PyPI](https://pypi.org/project/)**
 ## Usage
 
 ```python
+from multiobjective_gbt import MooGBTClassifier
+
 mu = 100
 b = 0.7 # upper bound on sub-objective cost
 
