@@ -156,7 +156,7 @@ constrained_gbt.fit(X_train, y_train_)
 ```
 
 From the constrained model, we achieve more than 100% gain in AuROC for the sub-objective while the loss in primary objective AuROC is kept within 6%.
-The entire study on this dataset can be found in the [example notebook](a).
+The entire study on this dataset can be found in the [example notebook](https://github.com/Swiggy/Moo-GBT/blob/master/examples/Constrained_classifer_example.ipynb).
 
 ## Looking at MooGBT primary and sub-objective losses - 
 
@@ -167,7 +167,8 @@ To get raw values of loss functions wrt boosting iteration,
 losses = constrained_gbt.loss_.get_losses()
 losses.head()
 ```
-<img src="assets/loss_values_.png" width="300" height="150">
+
+<img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/loss_values_.png" width="300" height="150">
 
 Similarly, you can also look at dual variable(alpha) values for sub-objective(s),
 
@@ -187,12 +188,12 @@ plt.ylabel("Cost")
 plt.legend(loc = "upper right")
 ```
 
-<img src="assets/plot_losses_1.png" width="520" height="220">
+<img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/plot_losses_1.png" width="520" height="220">
 
 ```python
 sns.lineplot(data=losses, x='n_estimators', y='primary_objective', label='primary objective')
 ```
-<img src="assets/plot_losses_2.png" width="520" height="220">
+<img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/plot_losses_2.png" width="520" height="220">
 
 ## Choosing the right upper bound constraint `b` and `mu` value
 
@@ -234,14 +235,14 @@ MooGBT optimizes for multiple objectives by defining constraints on sub-objectiv
 
 MooGBT differs from a standard GBT in the loss function it optimizes the primary objective C<sub>1</sub> and the sub-objectives using the Augmented Lagrangian(AL) constrained optimization approach.
 
-<img src="assets/loss_function.png" width="450" height="50">
+<img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/loss_function.png" width="450" height="50">
 
 where α = [α1, α2, α3…..] is a vector of dual variables. The Lagrangian is solved by minimizing with respect to the primal variables "s" and maximizing with respect to the dual variables α. Augmented Lagrangian iteratively solves the constraint optimization. 
 Since AL is an iterative approach we integerate it with the boosting iterations of GBT for updating the dual variable α.
 
 Alpha(α) update -
 
-<img src="assets/alpha_update.png" width="300" height="50">
+<img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/alpha_update.png" width="300" height="50">
 
 At an iteration k, if the constraint t is not satisfied, i.e., Ct (s) > bt, we have 
 α<sup>t</sup><sub>k</sub> > α<sup>t</sup><sub>k-1</sub>. Otherwise, is the constraint is met, the dual variable α is made 0.
@@ -250,22 +251,22 @@ At an iteration k, if the constraint t is not satisfied, i.e., Ct (s) > bt, we h
 
 ## Public contents
 
-*   [_gb_.py]():
+*   [_gb_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb.py):
     contains the `MooGBTClassifier` and `MooGBTRegressor` classes. Contains implementation of the fit and predict function.
 
-*   [_gb_losses_.py]():
+*   [_gb_losses_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb_losses.py):
     contains `BinomialDeviance` loss function class, `LeastSquares` loss function class
 
 
 ## More examples
 
 The
-[examples]()
+[examples](https://github.com/Swiggy/Moo-GBT/tree/master/examples)
 directory contains several illustrations of how one can use this library:
 
 *   [Jupyter](https://jupyter.org/) notebooks:
 
-    1.  [Constrained_classifer_example.ipynb](https://github.com/):
+    1.  [Constrained_classifer_example.ipynb](https://github.com/Swiggy/Moo-GBT/blob/master/examples/Constrained_classifer_example.ipynb):
         This notebook runs MooGBTClassifier for a primary objective and a single sub-objective. Both objectives are represented as binary variable.
 
     <!-- 1.  [Constrained_regressor_example.ipynb](https://github.com/): -->
