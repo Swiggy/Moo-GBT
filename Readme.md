@@ -49,11 +49,11 @@ Here `y_train`  contains 2 columns, the first column should be the primary objec
 
 ## Usage Steps
 <ol>
-	<li> Run unconstrained GBT on Primary Objective </li>
+	<li> Run unconstrained GBT on Primary Objective. Unconstrained GBT is just the GBTClassifer/GBTRegressor by scikit-learn </li>
 	<li> Calculate the loss function value for Primary Objective and sub-objective(s)</li>
 		<ul>
-			<li>For MooGBTClassifier calculate Log Loss between predicted probability and sub-objective label </li>
-			<li>For MooGBTRegressor calculate mean squared error between predicted value and sub-objective label </li>
+			<li>For MooGBTClassifier calculate Log Loss between predicted probability and sub-objective label(s) </li>
+			<li>For MooGBTRegressor calculate mean squared error between predicted value and sub-objective label(s) </li>
 		</ul>
 	<li> Set the value of hyperparamter b, less than the calculated cost in the previous step and run MooGBTClassifer/MooGBTRegressor with this b. The lower the value of b, the more the sub-objective will be optimized </li>
 </ol>
@@ -88,11 +88,11 @@ outcome_flag =  po
 
 # Train-Test Split
 X_train, X_test, y_train, y_test = train_test_split(
-							train_data[features],
-							train_data[outcome_flag],
-							test_size=0.2,
-							stratify=train_data[[po, so]],
-							random_state=2021
+					train_data[features],
+					train_data[outcome_flag],
+					test_size=0.2,
+					stratify=train_data[[po, so]],
+					random_state=2021
 )
 
 # Creating y_train_, y_test_ with 2 labels
@@ -103,18 +103,15 @@ y_train_[so] = X_train[so]
 y_test_ = pd.DataFrame()
 y_test_[po] = y_test
 y_test_[so] = X_test[so]
-
-X_train.drop(so, axis=1, inplace=True)
-X_test.drop(so, axis=1, inplace=True)
 ```
 
 MooGBTClassifier without the constraint parameter, works as the standard scikit-learn GBT classifier.
 
 ```python
 unconstrained_gbt = MooGBTClassifier(
-					loss='deviance',
-					n_estimators=100,
-					random_state=2021
+				loss='deviance',
+				n_estimators=100,
+				random_state=2021
 )
 
 unconstrained_gbt.fit(X_train, y_train)
@@ -136,7 +133,7 @@ so_test_cost = get_binomial_deviance_cost(pred_test, X_test[so])
 print (f"""
 Sub-objective cost train - {so_train_cost},
 Sub-objective cost test  - {so_test_cost}
-"""
+""")
 ```
 
     Sub-objective cost train - 0.9114,
@@ -149,24 +146,24 @@ In the unconstrained model, we see the cost of our sub-objective to be ~0.9. So 
 b = 0.65 # upper bound on cost
 mu = 100
 constrained_gbt = MooGBTClassifier(
-					loss='deviance',
-					n_estimators=100,
-					constraints=[{"mu":mu, "b":b}],
-					random_state=2021
+				loss='deviance',
+				n_estimators=100,
+				constraints=[{"mu":mu, "b":b}], # One Constraint
+				random_state=2021
 )
 
 constrained_gbt.fit(X_train, y_train_)
 ```
 
-From the constrained model, we achieve a 41% gain in AuROC for the sub-objective while the loss in primary objective AuROC is < 5% at 4.1%.
-The entire study on this dataset can be found in the [example notebook](a)(*** add link).
+From the constrained model, we achieve more than 100% gain in AuROC for the sub-objective while the loss in primary objective AuROC is kept within 6%.
+The entire study on this dataset can be found in the [example notebook](a).
 
 ## Looking at MooGBT primary and sub-objective losses - 
 
 To get raw values of loss functions wrt boosting iteration,
 
 ``` python
-# return a dataframe with loss values of objectives wrt boosting iteration
+# return a Pandas dataframe with loss values of objectives wrt boosting iteration
 losses = constrained_gbt.loss_.get_losses()
 losses.head()
 ```
@@ -184,7 +181,7 @@ These losses can be used to look at the MooGBT Learning process.
 ``` python
 sns.lineplot(data=losses, x='n_estimators', y='primary_objective',\
      label='primary objective')
-sns.lineplot(data=losses, x='n_estimators', y='sub-objective-1',\
+sns.lineplot(data=losses, x='n_estimators', y='sub_objective_1',\
      label='subobjective')
 plt.xlabel("# estimators(trees)")
 plt.ylabel("Cost")
@@ -199,22 +196,22 @@ sns.lineplot(data=losses, x='n_estimators', y='primary_objective',\
 ```
 <img src="assets/plot_losses_2.png" width="520" height="220">
 
-## Choosing the right upper bound constraint and `mu` value
+## Choosing the right upper bound constraint `b` and `mu` value
 
 The upper bound should be defined based on a acceptable % loss in the primary objective evaluation metric. For stricter upper bounds, this loss would be greater as MooGBT will optimize for the sub-objective more.<br>
 
 Below table summarizes the effect of the upper bound value on the model performance for primary and sub-objective(s) for the above example. <br>
 
-%gain specifies the percentage increase in AuROC for the constrained MooGBT model from an uncostrained GBT model.
+%gain specifies the percentage increase in AUROC for the constrained MooGBT model from an uncostrained GBT model.
 
 
-|   b  |  mu | Primary Objective - %gain | Sub-Objective - %gain|
-|:----:|:---:|:-----------------:|:-------------:|
-|  0.9 |  10 |      -0.7058      |     4.805     |
-|  0.8 | 100 |       -1.735      |     40.08     |
-|  0.7 | 100 |      -2.7852      |    62.7144    |
-| 0.65 |  10 |      -5.8242      |    113.9427   |
-|  0.6 |  10 |      -9.9137      |    159.8931   |
+|   b  | Primary Objective - %gain | Sub-Objective - %gain|
+|:----:|:-----------------:|:-------------:|
+|  0.9 |      -0.7058      |     4.805     |
+|  0.8 |       -1.735      |     40.08     |
+|  0.7 |      -2.7852      |    62.7144    |
+| 0.65 |      -5.8242      |    113.9427   |
+|  0.6 |      -9.9137      |    159.8931   |
 
 
 In general, across our experiments we have found that lower values of `mu` optimize on the primary objective better while satisfying the sub-objective constraints given enough boosting iterations(n_estimators).
@@ -237,19 +234,19 @@ The below table summarizes the results of varying `mu` values keeping the upper 
 
 MooGBT optimizes for multiple objectives by defining constraints on sub-objective(s) along with a primary objective. The constraints are defined as upper bounds on sub-objective loss function.
 
-MooGBT differs from a standard GBT in the loss function it optimizes the primary objective C1 and the sub-objectives using the Augmented Lagrangian constrained optimization approach.
+MooGBT differs from a standard GBT in the loss function it optimizes the primary objective C<sub>1</sub> and the sub-objectives using the Augmented Lagrangian(AL) constrained optimization approach.
 
 <img src="assets/loss_function.png" width="450" height="50">
 
-where αis are solved by minimizing with respect to the primal variables s and maximizing with respect to the dual variables α. AL iteratively solves the constraint optimization while alleviating non-smoothness in α arising in the dual. 
+where α = [α1, α2, α3…..] is a vector of dual variables. The Lagrangian is solved by minimizing with respect to the primal variables "s" and maximizing with respect to the dual variables α. Augmented Lagrangian iteratively solves the constraint optimization. 
 Since AL is an iterative approach we integerate it with the boosting iterations of GBT for updating the dual variable α.
 
 Alpha(α) update -
 
 <img src="assets/alpha_update.png" width="300" height="50">
 
-At an iteration k, if the constraint t is not satisfied, i.e., Ct(s) > b
-αt increases unless the constraint is already satisfied. Intuitively, we can consider it as weighting that is adjusted each iteration to overweight an unsatisfied constraint that is associated the cost we want to improve. 
+At an iteration k, if the constraint t is not satisfied, i.e., Ct (s) > bt, we have 
+α<sup>t</sup><sub>k</sub> > α<sup>t</sup><sub>k-1</sub>. Otherwise, is the constraint is met, the dual variable α is made 0.
 
 
 
@@ -284,3 +281,7 @@ Communications of the ACM, 11(3), 147-148.
 
 Multi-objective Ranking via Constrained Optimization -->
         
+## References - 
+<a id="1">[1]</a> Multi-objective Ranking via Constrained Optimization - https://arxiv.org/pdf/2002.05753.pdf <br>
+<a id="2">[2]</a> Multi-objective Relevance Ranking - https://sigir-ecom.github.io/ecom2019/ecom19Papers/paper30.pdf <br>
+<a id="3">[3]</a> Scikit-learn GBT Implementation - <a href="https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html">GBTClassifier </a> and <a href="https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html#sklearn.ensemble.RandomForestRegressor">GBTRegressor </a>
