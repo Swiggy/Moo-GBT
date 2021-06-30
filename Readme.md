@@ -4,7 +4,7 @@ MooGBT is a library for Multi-objective optimization in Gradient Booseted Trees.
 <br> <br>
  With AL, we introduce dual variables in Boosting. The dual variables are iteratively optimized and fit well within the Boosting iterations. The Boosting objective function is updated with the AL terms and the gradient is readily derived using the GBT gradients. With the gradient and updates of dual variables, we solve the optimization problem by jointly iterating AL and Boosting steps.
  <br>
-This library is motivated by work done in the paper <a href="https://sigir-ecom.github.io/ecom2019/ecom19Papers/paper30.pdf">Multi-objective Relevance Ranking </a>, which introduces an Augmented Lagrangian based method to incorporate multiple objectives (MO) in LambdaMART, which is a GBT based search ranking algorithm.
+This library is motivated by work done in the paper <a href="https://sigir-ecom.github.io/ecom2019/ecom19Papers/paper30.pdf">Multi-objective Relevance Ranking</a>, which introduces an Augmented Lagrangian based method to incorporate multiple objectives (MO) in LambdaMART, which is a GBT based search ranking algorithm.
 
 <!-- [[1]](#1) -->
 
@@ -33,13 +33,13 @@ Moo-GBT can be installed from **[PyPI](https://pypi.org/project/)**
 ```python
 mu = 100
 b = 0.7 # upper bound on sub-objective cost
-constrained_gbt = MooGBTClassifier(
-					loss='deviance',
-					n_estimators=100,
-					constraints=[{"mu":mu, "b":b}], # 1 sub-objective with parameters b and mu
-					random_state=2021
-)
 
+constrained_gbt = MooGBTClassifier(
+				loss='deviance',
+				n_estimators=100,
+				constraints=[{"mu":mu, "b":b}], # One Constraint
+				random_state=2021
+)
 constrained_gbt.fit(X_train, y_train)
 ```
 
@@ -179,10 +179,9 @@ constrained_gbt.loss_.get_alphas()
 These losses can be used to look at the MooGBT Learning process.
 
 ``` python
-sns.lineplot(data=losses, x='n_estimators', y='primary_objective',\
-     label='primary objective')
-sns.lineplot(data=losses, x='n_estimators', y='sub_objective_1',\
-     label='subobjective')
+sns.lineplot(data=losses, x='n_estimators', y='primary_objective', label='primary objective')
+sns.lineplot(data=losses, x='n_estimators', y='sub_objective_1', label='subobjective')
+
 plt.xlabel("# estimators(trees)")
 plt.ylabel("Cost")
 plt.legend(loc = "upper right")
@@ -191,8 +190,7 @@ plt.legend(loc = "upper right")
 <img src="assets/plot_losses_1.png" width="520" height="220">
 
 ```python
-sns.lineplot(data=losses, x='n_estimators', y='primary_objective',\
-     label='primary objective')
+sns.lineplot(data=losses, x='n_estimators', y='primary_objective', label='primary objective')
 ```
 <img src="assets/plot_losses_2.png" width="520" height="220">
 
