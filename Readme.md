@@ -1,6 +1,6 @@
 # Multi-objective Optimized GBT(MooGBT)
 
-MooGBT is a library for Multi-objective optimization in Gradient Booseted Trees. MooGBT optimizes for multiple objectives by defining constraints on sub-objective(s) loss value along with a primary objective. The constraints are defined as upper bounds on sub-objective loss function. MooGBT uses a Augmented Lagrangian(AL) based constrained optimization framework with Gradient Boosted Trees, to optimize for multiple objectives.
+MooGBT is a library for Multi-objective optimization in Gradient Booseted Trees. MooGBT optimizes for multiple objectives by defining constraints on sub-objective(s) along with a primary objective. The constraints are defined as upper bounds on sub-objective loss function. MooGBT uses a Augmented Lagrangian(AL) based constrained optimization framework with Gradient Boosted Trees, to optimize for multiple objectives.
 <br> <br>
  With AL, we introduce dual variables in Boosting. The dual variables are iteratively optimized and fit within the Boosting iterations. The Boosting objective function is updated with the AL terms and the gradient is readily derived using the GBT gradients. With the gradient and updates of dual variables, we solve the optimization problem by jointly iterating AL and Boosting steps.
 <br> <br>
