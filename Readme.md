@@ -21,7 +21,7 @@ Current support -
 <br>
 
 ## Installation
-Moo-GBT can be installed from **[PyPI](https://pypi.org/project/)**
+Moo-GBT can be installed from **[PyPI](https://pypi.org/project/moo-gbt/)**
 
  ```python
  pip3 install moo-gbt
