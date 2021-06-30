@@ -244,8 +244,8 @@ Alpha(α) update -
 
 <img src="https://raw.githubusercontent.com/Swiggy/Moo-GBT/master/assets/alpha_update.png" width="300" height="50">
 
-At an iteration k, if the constraint t is not satisfied, i.e., Ct (s) > bt, we have 
-α<sup>t</sup><sub>k</sub> > α<sup>t</sup><sub>k-1</sub>. Otherwise, is the constraint is met, the dual variable α is made 0.
+At an iteration k, if the constraint t is not satisfied, i.e., C<sub>t</sub>(s) > b<sub>t</sub>, we have 
+α<sup>t</sup><sub>k</sub> > α<sup>t</sup><sub>k-1</sub>. Otherwise, if the constraint is met, the dual variable α is made 0.
 
 
 
