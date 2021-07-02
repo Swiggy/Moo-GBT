@@ -6,12 +6,15 @@ MooGBT is a library for Multi-objective optimization in Gradient Booseted Trees.
 <br> <br>
 This library is motivated by work done in the paper <a href="https://sigir-ecom.github.io/ecom2019/ecom19Papers/paper30.pdf">Multi-objective Relevance Ranking</a>, which introduces an Augmented Lagrangian based method to incorporate multiple objectives (MO) in LambdaMART, which is a GBT based search ranking algorithm.
 
+We have modified the scikit-learn GBT implementation [[3]](#3) to support multi-objective optimization.
+
 <!-- [[1]](#1) -->
 
 Highlights - 
 <li> follows the  <a href="https://scikit-learn.org/">scikit-learn</a>  API conventions </li>
 <!-- <li> supports natively both dense and sparse data representations </li> -->
 <li> supports all hyperparameters present in scikit-learn GBT</li>
+<li> supports optimization for more than 1 sub-objectives</li>
 <br>
 
 Current support -
