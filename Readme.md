@@ -256,11 +256,11 @@ At an iteration k, if the constraint t is not satisfied, i.e., C<sub>t</sub>(s) 
 
 ## Public contents
 
-*   [_gb_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb.py):
-    contains the `MooGBTClassifier` and `MooGBTRegressor` classes. Contains implementation of the fit and predict function.
+*   [__gb_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb.py):
+    contains the `MooGBTClassifier` and `MooGBTRegressor` classes. Contains implementation of the fit and predict function. Extended implementation from [__gb_.py](https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/ensemble/_gb.py) from scikit-learn. 
 
-*   [_gb_losses_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb_losses.py):
-    contains `BinomialDeviance` loss function class, `LeastSquares` loss function class
+*   [__gb_losses_.py](https://github.com/Swiggy/Moo-GBT/blob/master/src/multiobjective_gbt/_gb_losses.py):
+    contains `BinomialDeviance` loss function class, `LeastSquares` loss function class. Extended implementation from [_gb_losses.py](https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/ensemble/_gb_losses.py) from scikit-learn. 
 
 
 ## More examples
