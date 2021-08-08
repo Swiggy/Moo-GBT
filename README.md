@@ -274,8 +274,8 @@ directory contains several illustrations of how one can use this library:
     1.  [Constrained_classifer_example.ipynb](https://github.com/Swiggy/Moo-GBT/blob/master/examples/Constrained_classifer_example.ipynb):
         This notebook runs MooGBTClassifier for a primary objective and a single sub-objective. Both objectives are represented as binary variable.
 
-    <!-- 1.  [Constrained_regressor_example.ipynb](https://github.com/): -->
-
+    2.  [Constrained_regressor_example.ipynb](https://github.com/Swiggy/Moo-GBT/blob/master/examples/Constrained_regressor_example.ipynb):
+	This notebook runs MooGBTRegressor for a primary objective and 5 sub-objectives. All objectives are represented as continuous variables.
 
 <!-- ## References
 <a id="1">[1]</a> Michinari Momma, Alireza Bagheri Garakani, Yi Sun 
