@@ -60,7 +60,7 @@ Here `y_train`  contains 2 columns, the first column should be the primary objec
 			<li>For MooGBTClassifier calculate Log Loss between predicted probability and sub-objective label(s) </li>
 			<li>For MooGBTRegressor calculate mean squared error between predicted value and sub-objective label(s) </li>
 		</ul>
-	<li> Set the value of hyperparamter b, less than the calculated cost in the previous step and run MooGBTClassifer/MooGBTRegressor with this b. The lower the value of b, the more the sub-objective will be optimized </li>
+	<li> Set the value of hyperparameter b, less than the calculated cost in the previous step and run MooGBTClassifer/MooGBTRegressor with this b. The lower the value of b, the more the sub-objective will be optimized </li>
 </ol>
 
 <br>
