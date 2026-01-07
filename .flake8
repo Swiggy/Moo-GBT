@@ -1,0 +1,20 @@
+[flake8]
+# E501 line too long
+# W503 line break before binary operator
+# E203 whitespace before ':'
+ignore = E501, W503, E203
+
+# Suppress TODO/FIXME warnings
+extend-ignore = T101
+
+max-line-length = 79
+exclude = 
+    .git,
+    __pycache__,
+    build,
+    dist,
+    .eggs,
+    *.egg-info,
+    .venv,
+    venv
+

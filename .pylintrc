@@ -1,0 +1,17 @@
+[MESSAGES CONTROL]
+disable=
+    fixme,
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    abstract-method,
+    no-member,
+    protected-access,
+
+[DESIGN]
+max-attributes=10
+
+[FORMAT]
+max-line-length=79
+

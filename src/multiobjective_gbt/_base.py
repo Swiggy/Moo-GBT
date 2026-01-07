@@ -15,7 +15,21 @@ from sklearn.base import clone
 from sklearn.base import is_classifier, is_regressor
 from sklearn.base import BaseEstimator
 from sklearn.base import MetaEstimatorMixin
-from sklearn.utils import Bunch, _print_elapsed_time
+from sklearn.utils import Bunch
+try:  # sklearn >=1.2 removed _print_elapsed_time
+    from sklearn.utils import _print_elapsed_time
+except ImportError:  # pragma: no cover - fallback for newer sklearn
+    from contextlib import contextmanager
+    from time import time as _time
+
+    @contextmanager
+    def _print_elapsed_time(message_clsname=None, message=None):
+        start = _time()
+        yield
+        duration = _time() - start
+        if message is not None:
+            prefix = f"[{message_clsname}] " if message_clsname else ""
+            print(f"{prefix}{message} in {duration:.3f}s")
 from sklearn.utils import check_random_state
 from sklearn.utils.metaestimators import _BaseComposition
 
