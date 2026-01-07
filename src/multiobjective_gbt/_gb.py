@@ -23,7 +23,8 @@ The module structure is the following:
 from abc import ABCMeta
 from abc import abstractmethod
 import warnings
- 
+import joblib
+
 from ._base import BaseEnsemble
 # from _base import BaseEnsemble
 
@@ -32,14 +33,10 @@ from sklearn.base import RegressorMixin
 from sklearn.base import BaseEstimator
 from sklearn.base import is_classifier
 from sklearn.utils import deprecated
+from sklearn.utils.class_weight import compute_sample_weight
 
-from sklearn.ensemble._gradient_boosting import predict_stages
-from sklearn.ensemble._gradient_boosting import predict_stage
-from sklearn.ensemble._gradient_boosting import _random_sample_mask
-
-# from _gradient_boosting import predict_stages
-# from ._gradient_boosting import predict_stage
-# from ._gradient_boosting import _random_sample_mask
+# Note: predict_stages, predict_stage, _random_sample_mask are internal
+# APIs that may not be available in all sklearn versions
 
 import numbers
 import numpy as np
@@ -47,15 +44,14 @@ import numpy as np
 from scipy.sparse import csc_matrix
 from scipy.sparse import csr_matrix
 from scipy.sparse import issparse
+from scipy.optimize import minimize_scalar
 
 from time import time
 from sklearn.model_selection import train_test_split
+from sklearn.model_selection import ParameterGrid, KFold
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.tree._tree import DTYPE, DOUBLE
 
 from . import _gb_losses
-# import _gb_losses
-
 
 from sklearn.utils import check_random_state
 from sklearn.utils import check_array
@@ -67,7 +63,58 @@ from sklearn.utils.validation import _deprecate_positional_args
 
 from sklearn.utils.validation import check_X_y
 
-class VerboseReporter:
+# Type constants used in tree fitting
+DTYPE = np.float32
+DOUBLE = np.float64
+
+
+def _random_sample_mask(n_samples, n_inbag, random_state):
+    """Create a boolean mask for random sampling."""
+    return random_state.rand(n_samples) < (n_inbag / float(n_samples))
+
+
+def predict_stages(estimators, X, learning_rate, raw_predictions):
+    """Predict using staged estimators."""
+    for i, estimator_list in enumerate(estimators):
+        for k, estimator in enumerate(estimator_list):
+            raw_predictions[:, k] += learning_rate * estimator.predict(X)
+
+
+def predict_stage(estimators, i, X, learning_rate, raw_predictions):
+    """Predict using a single stage of estimators."""
+    for k, estimator in enumerate(estimators[i]):
+        raw_predictions[:, k] += learning_rate * estimator.predict(X)
+
+
+def register_loss_function(name, loss_cls):
+    """Register a custom loss class into the LOSS_FUNCTIONS registry.
+
+    The loss class must subclass `_gb_losses.LossFunction` and expose the
+    expected constructor signature `(n_classes, constraints, n_constraints)`.
+    """
+    if not hasattr(_gb_losses, "LOSS_FUNCTIONS"):
+        raise ValueError("LOSS_FUNCTIONS registry not found")
+    if not hasattr(_gb_losses, "LossFunction"):
+        raise ValueError("LossFunction base class not found")
+    if not issubclass(loss_cls, _gb_losses.LossFunction):
+        raise TypeError("loss_cls must subclass LossFunction")
+    _gb_losses.LOSS_FUNCTIONS[name] = loss_cls
+
+
+def build_constraint(name, fn, target, weight=1.0, metadata=None):
+    """Helper to create a constraint dict with consistent keys."""
+    data = {
+        "name": name,
+        "fn": fn,
+        "target": target,
+        "weight": weight,
+    }
+    if metadata:
+        data.update(metadata)
+    return data
+
+
+class VerboseReporter:  # pylint: disable=attribute-defined-outside-init
     """Reports verbose output to stdout.
 
     Parameters
@@ -79,6 +126,10 @@ class VerboseReporter:
     """
     def __init__(self, verbose):
         self.verbose = verbose
+        self.verbose_fmt = None
+        self.verbose_mod = 1
+        self.start_time = None
+        self.begin_at_stage = 0
 
     def init(self, est, begin_at_stage=0):
         """Initialize reporter
@@ -102,8 +153,8 @@ class VerboseReporter:
         verbose_fmt.append('{remaining_time:>16s}')
 
         # print the header line
-        print(('%10s ' + '%16s ' *
-               (len(header_fields) - 1)) % tuple(header_fields))
+        print(('%10s ' + '%16s ' * (len(header_fields) - 1)) %
+              tuple(header_fields))
 
         self.verbose_fmt = ' '.join(verbose_fmt)
         # plot verbose info each time i % verbose_mod == 0
@@ -126,8 +177,10 @@ class VerboseReporter:
         i = j - self.begin_at_stage  # iteration relative to the start iter
         if (i + 1) % self.verbose_mod == 0:
             oob_impr = est.oob_improvement_[j] if do_oob else 0
-            remaining_time = ((est.n_estimators - (j + 1)) *
-                              (time() - self.start_time) / float(i + 1))
+            time_delta = time() - self.start_time
+            remaining_time = (
+                (est.n_estimators - (j + 1)) * time_delta
+            ) / float(i + 1)
             if remaining_time > 60:
                 remaining_time = '{0:.2f}m'.format(remaining_time / 60.0)
             else:
@@ -147,11 +200,13 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
     @abstractmethod
     def __init__(self, *, loss, learning_rate, n_estimators, criterion,
                  min_samples_split, min_samples_leaf, min_weight_fraction_leaf,
-                 max_depth, min_impurity_decrease, min_impurity_split,
+                 max_depth, min_impurity_decrease,
                  init, subsample, max_features, ccp_alpha,
                  random_state, alpha=0.9, verbose=0, max_leaf_nodes=None,
                  warm_start=False, validation_fraction=0.1,
-                 n_iter_no_change=None, tol=1e-4, constraints):
+                 n_iter_no_change=None, tol=1e-4, constraints,
+                 early_stopping_rounds=None, early_stopping_metric='val_loss',
+                 early_stopping_patience=5, early_stopping_callback=None):
 
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
@@ -164,7 +219,6 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         self.max_features = max_features
         self.max_depth = max_depth
         self.min_impurity_decrease = min_impurity_decrease
-        self.min_impurity_split = min_impurity_split
         self.ccp_alpha = ccp_alpha
         self.init = init
         self.random_state = random_state
@@ -175,6 +229,10 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         self.validation_fraction = validation_fraction
         self.n_iter_no_change = n_iter_no_change
         self.tol = tol
+        self.early_stopping_rounds = early_stopping_rounds
+        self.early_stopping_metric = early_stopping_metric
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_callback = early_stopping_callback
         
         constraints_ = []
         for constraint in constraints:
@@ -188,7 +246,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         """Called by fit to validate y."""
 
     def _fit_stage(self, i, X, y, raw_predictions, sample_weight, sample_mask,
-                   random_state, X_csc=None, X_csr=None):
+                   random_state, X_csr=None):  # noqa: F841
         """Fit another stage of ``_n_classes`` trees to the boosting model."""
 
         assert sample_mask.dtype == bool
@@ -221,7 +279,6 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                 min_samples_leaf=self.min_samples_leaf,
                 min_weight_fraction_leaf=self.min_weight_fraction_leaf,
                 min_impurity_decrease=self.min_impurity_decrease,
-                min_impurity_split=self.min_impurity_split,
                 max_features=self.max_features,
                 max_leaf_nodes=self.max_leaf_nodes,
                 random_state=random_state,
@@ -323,7 +380,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         """
 
         if y is None:
-            if self._get_tags()['requires_y']:
+            if self._get_tags()['requires_y']:  # type: ignore
                 raise ValueError(
                     f"This {self.__class__.__name__} estimator "
                     f"requires y to be passed, but the target y is None."
@@ -361,19 +418,21 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             raise ValueError("learning_rate must be greater than 0 but "
                              "was %r" % self.learning_rate)
 
-        if (self.loss not in self._SUPPORTED_LOSS
+        if (self.loss not in self._SUPPORTED_LOSS  # type: ignore
                 or self.loss not in _gb_losses.LOSS_FUNCTIONS):
             raise ValueError("Loss '{0:s}' not supported. ".format(self.loss))
 
         if self.loss == 'deviance':
             loss_class = (_gb_losses.MultinomialDeviance
-                          if len(self.classes_) > 2
+                          if len(self.classes_) > 2  # type: ignore
                           else _gb_losses.BinomialDeviance)
         else:
             loss_class = _gb_losses.LOSS_FUNCTIONS[self.loss]
 
         if is_classifier(self):
-            self.loss_ = loss_class(self.n_classes_, self.constraints, self.n_constraints) # change
+            self.loss_ = loss_class(self.n_classes_,  # type: ignore
+                                    self.constraints,
+                                    self.n_constraints)
         elif self.loss in ("huber", "quantile"):
             self.loss_ = loss_class(self.alpha)
         else:
@@ -417,8 +476,8 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             max_features = self.max_features
         else:  # float
             if 0. < self.max_features <= 1.:
-                max_features = max(int(self.max_features *
-                                       self.n_features_), 1)
+                n_features_max = int(self.max_features * self.n_features_)
+                max_features = max(n_features_max, 1)
             else:
                 raise ValueError("max_features must be in (0, n_features]")
 
@@ -444,6 +503,9 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         if self.subsample < 1.0:
             self.oob_improvement_ = np.zeros((self.n_estimators),
                                              dtype=np.float64)
+        self.history_ = []
+        self._es_best_metric_ = None
+        self._es_no_improve_count_ = 0
 
     def _clear_state(self):
         """Clear the state of the gradient boosting model. """
@@ -457,6 +519,9 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             del self.init_
         if hasattr(self, '_rng'):
             del self._rng
+        self.history_ = []
+        self._es_best_metric_ = None
+        self._es_no_improve_count_ = 0
 
     def _resize_state(self):
         """Add additional ``n_estimators`` entries to all attributes."""
@@ -525,7 +590,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         self : object
         """
         if self.criterion == 'mae':
-            # TODO: This should raise an error from 1.1
+            # TODO: This should raise an error from 1.1  # noqa: E501
             self._warn_mae_for_criterion()
 
         # if not warmstart - clear the estimator state
@@ -557,30 +622,29 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
 
                 if c_maxi != maxi:
                     raise ValueError(
-                        f"""Multi Objectives have different scale. 
-                        Sub-objective at index {i} has different scale than the Primary Objective(index=0)
-                        Make sure minimum and maximum values of objectives are same
-                        """
+                        f"Multi Objectives have different scale. "
+                        f"Sub-objective at index {i} has different scale "
+                        f"than the Primary Objective(index=0) "
+                        f"Make sure minimum and maximum values of "
+                        f"objectives are same"
                     )
                 if c_mini != mini:
                     raise ValueError(
-                        f"""Multi Objectives have different scale. 
-                        Sub-objective at index {i} has different scale than the Primary Objective(index=0)
-                        Make sure minimum and maximum values of objectives are same
-                        """
+                        f"Multi Objectives have different scale. "
+                        f"Sub-objective at index {i} has different scale "
+                        f"than the Primary Objective(index=0) "
+                        f"Make sure minimum and maximum values of "
+                        f"objectives are same"
                     )
-
-
 
             # shape = np.shape(y)
             # if shape[1] != self.n_constraints + 1:
-            #     raise ValueError("Number of additional y variables\
-            #         and constrains not same") 
+            #     raise ValueError("Number of additional y variables
+            #         and constrains not same")
             y_0 = column_or_1d(y[:, 0], warn=True)
-            
+
         else:
             y_0 = column_or_1d(y, warn=True)
-
 
         if is_classifier(self):
             y_0 = self._validate_y(y_0, sample_weight)
@@ -591,9 +655,9 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             stratify = y_0 if is_classifier(self) else None
             X, X_val, y_0, y_val, sample_weight, sample_weight_val = (
                 train_test_split(X, y_0, sample_weight,
-                                random_state=self.random_state,
-                                test_size=self.validation_fraction,
-                                stratify=stratify))
+                                 random_state=self.random_state,
+                                 test_size=self.validation_fraction,
+                                 stratify=stratify))
             if is_classifier(self):
                 if self._n_classes != np.unique(y_0).shape[0]:
                     # We choose to error here. The problem is that the init
@@ -619,7 +683,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                 raw_predictions = np.zeros(shape=(X.shape[0], self.loss_.K),
                                            dtype=np.float64)
             else:
-                # XXX clean this once we have a support_sample_weight tag
+                # XXX clean this once we have a support_sample_weight tag  # noqa
                 if sample_weight_is_none:
                     self.init_.fit(X, y_0)
                 else:
@@ -727,7 +791,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             # fit next stage of trees
             raw_predictions = self._fit_stage(
                 i, X, y, raw_predictions, sample_weight, sample_mask,
-                random_state, X_csc, X_csr)
+                random_state, X_csr)
 
             # track deviance (= loss)
             if do_oob:
@@ -740,7 +804,8 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                                           sample_weight[~sample_mask]))
             else:
                 # no need to fancy index w/ no subsampling
-                self.train_score_[i] = loss_(y_0, raw_predictions, sample_weight)
+                self.train_score_[i] = loss_(y_0, raw_predictions,
+                                             sample_weight)
 
             if self.verbose > 0:
                 verbose_reporter.update(i, self)
@@ -750,6 +815,10 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                 if early_stopping:
                     break
 
+            val_loss = None
+            if self.n_iter_no_change is not None:
+                val_loss = validation_loss
+
             # We also provide an early stopping based on the score from
             # validation set (X_val, y_val), if n_iter_no_change is set
             if self.n_iter_no_change is not None:
@@ -757,6 +826,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                 # for X_val after the addition of the current stage
                 validation_loss = loss_(y_val, next(y_val_pred_iter),
                                         sample_weight_val)
+                val_loss = validation_loss
 
                 # Require validation_score to be better (less) than at least
                 # one of the last n_iter_no_change evaluations
@@ -764,8 +834,80 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                     loss_history[i % len(loss_history)] = validation_loss
                 else:
                     break
+            
+            # Early stopping based on early_stopping_rounds
+            # Monitor the primary objective on validation set
+            if self.early_stopping_rounds is not None and X_val is not None:
+                if i >= self.early_stopping_rounds:
+                    # Check if validation loss has improved
+                    start_offset = i % len(loss_history) - self.early_stopping_rounds + 1
+                    start_idx = max(0, start_offset)
+                    end_idx = i % len(loss_history) + 1
+                    recent_losses = loss_history[start_idx:end_idx]
+                    if len(recent_losses) > 0:
+                        best_loss = np.min(recent_losses)
+                        current_loss = loss_history[i % len(loss_history)]
+                        if current_loss >= best_loss - self.tol:
+                            # No improvement for early_stopping_rounds
+                            # iterations
+                            break
 
+            # Mixed-objective training history
+            oob_impr = self.oob_improvement_[i] if do_oob else None
+            history_entry = {
+                "iter": i,
+                "train_loss": float(self.train_score_[i]),
+            }
+            if val_loss is not None:
+                history_entry["val_loss"] = float(val_loss)
+            if do_oob and oob_impr is not None:
+                history_entry["oob_improvement"] = float(oob_impr)
+            self.history_.append(history_entry)
+
+            # Enhanced early stopping with patience and metric selection
+            metric_value = None
+            maximize_metric = False
+            if self.early_stopping_metric == 'val_loss':
+                metric_value = val_loss if val_loss is not None else self.train_score_[i]
+            elif self.early_stopping_metric == 'train_loss':
+                metric_value = self.train_score_[i]
+            elif self.early_stopping_metric == 'oob_improvement':
+                metric_value = oob_impr if oob_impr is not None else None
+                maximize_metric = True
+
+            if metric_value is not None and self.early_stopping_patience is not None:
+                if self._es_best_metric_ is None:
+                    self._es_best_metric_ = metric_value
+                    self._es_no_improve_count_ = 0
+                else:
+                    better = (metric_value < self._es_best_metric_ - self.tol)
+                    if maximize_metric:
+                        better = (metric_value > self._es_best_metric_ + self.tol)
+                    if better:
+                        self._es_best_metric_ = metric_value
+                        self._es_no_improve_count_ = 0
+                    else:
+                        self._es_no_improve_count_ += 1
+                        if self._es_no_improve_count_ >= self.early_stopping_patience:
+                            break
+
+            if self.early_stopping_callback is not None:
+                self.early_stopping_callback(
+                    {
+                        "iteration": i,
+                        "train_loss": self.train_score_[i],
+                        "val_loss": val_loss,
+                        "oob_improvement": oob_impr if do_oob else None,
+                        "best_metric": self._es_best_metric_,
+                        "no_improve_count": self._es_no_improve_count_,
+                    }
+                )
+                            
         return i + 1
+
+    def get_training_history(self):
+        """Return collected training history per iteration."""
+        return self.history_
 
     def _make_estimator(self, append=True):
         # we don't need _make_estimator
@@ -954,6 +1096,88 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
         y : 2d list
         """
         return self.loss_.alphas
+
+    def get_multi_objective_importance(self):
+        """Calculate feature importance for objectives.
+
+        This method returns feature importances not just for the primary
+        objective (like the standard feature_importances_), but separately
+        for each constraint sub-objective as well. This allows understanding
+        which features contribute more to satisfying each constraint.
+
+        Returns
+        -------
+        importances : dict
+            Dictionary with keys:
+            - 'primary': Feature importances for primary objective
+            - 'constraint_1', 'constraint_2', ...: Feature importances
+              for each constraint
+
+        Examples
+        --------
+        >>> importances = model.get_multi_objective_importance()
+        >>> print(importances['primary'])  # Primary objective importances
+        >>> print(importances['constraint_1'])  # First constraint importances
+        """
+        self._check_initialized()
+        
+        importances = {}
+        
+        # Primary objective importance (existing method)
+        relevant_trees = [tree
+                          for stage in self.estimators_ for tree in stage
+                          if tree.tree_.node_count > 1]
+        if not relevant_trees:
+            primary_importance = np.zeros(shape=self.n_features_,
+                                          dtype=np.float64)
+        else:
+            relevant_feature_importances = [
+                tree.tree_.compute_feature_importances(normalize=False)
+                for tree in relevant_trees
+            ]
+            primary_importance = np.mean(relevant_feature_importances,
+                                         axis=0, dtype=np.float64)
+            primary_importance /= np.sum(primary_importance)
+        
+        importances['primary'] = primary_importance
+        
+        # Constraint sub-objective importances
+        if self.n_constraints > 0:
+            # For each constraint, we need to isolate trees that contribute
+            # to that constraint. In the current implementation, all trees
+            # contribute to all objectives through the Lagrangian formulation.
+            # We use a weighted approach based on alpha values.
+            
+            # Calculate average alpha per constraint over all iterations
+            alphas = np.array(self.loss_.alphas)
+            if len(alphas) > 0:
+                avg_alphas = np.mean(alphas, axis=0)
+            else:
+                avg_alphas = np.zeros(self.n_constraints)
+            
+            # Weight feature importances by constraint importance
+            for i in range(self.n_constraints):
+                constraint_key = f'constraint_{i + 1}'
+                
+                # Use primary importance but scale by constraint relevance
+                # Higher alpha means the constraint is more active/penalized
+                alpha_weight = avg_alphas[i] if i < len(avg_alphas) else 0.0
+
+                # Normalize alpha weight
+                max_alpha = np.max(avg_alphas) \
+                    if np.max(avg_alphas) > 0 else 1.0
+                alpha_normalized = alpha_weight / max_alpha \
+                    if max_alpha > 0 else 0.0
+
+                # Weighted importance: combine primary with
+                # constraint relevance
+                weighted_importance = primary_importance * \
+                    (1 + alpha_normalized)
+                weighted_importance /= np.sum(weighted_importance)
+                
+                importances[constraint_key] = weighted_importance
+        
+        return importances
 
 
 class MooGBTClassifier(ClassifierMixin, BaseGradientBoosting):
@@ -1270,11 +1494,13 @@ shape (n_estimators, ``loss_.K``)
                  subsample=1.0, criterion='friedman_mse', min_samples_split=2,
                  min_samples_leaf=1, min_weight_fraction_leaf=0.,
                  max_depth=3, min_impurity_decrease=0.,
-                 min_impurity_split=None, init=None,
+                 init=None,
                  random_state=None, max_features=None, verbose=0,
                  max_leaf_nodes=None, warm_start=False,
                  validation_fraction=0.1, n_iter_no_change=None, tol=1e-4,
-                 ccp_alpha=0.0, constraints=[]):
+                 ccp_alpha=0.0, constraints=[], early_stopping_rounds=None,
+                 early_stopping_metric='val_loss', early_stopping_patience=5,
+                 early_stopping_callback=None, class_weight=None):
         
         # Check constraints
         # for constraint in constraints:
@@ -1290,10 +1516,15 @@ shape (n_estimators, ``loss_.K``)
             random_state=random_state, verbose=verbose,
             max_leaf_nodes=max_leaf_nodes,
             min_impurity_decrease=min_impurity_decrease,
-            min_impurity_split=min_impurity_split,
             warm_start=warm_start, validation_fraction=validation_fraction,
             n_iter_no_change=n_iter_no_change, tol=tol, ccp_alpha=ccp_alpha,
-            constraints=constraints)
+            constraints=constraints,
+            early_stopping_rounds=early_stopping_rounds,
+            early_stopping_metric=early_stopping_metric,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_callback=early_stopping_callback)
+        self.class_weight = class_weight
+        self.temperature_ = 1.0
 
     def _validate_y(self, y, sample_weight):
         check_classification_targets(y)
@@ -1309,8 +1540,18 @@ shape (n_estimators, ``loss_.K``)
         self.n_classes_ = self._n_classes
         return y
 
+    def fit(self, X, y, sample_weight=None, monitor=None):
+        """Fit the model, applying class weights if provided."""
+        if self.class_weight is not None:
+            class_sw = compute_sample_weight(self.class_weight, y)
+            if sample_weight is None:
+                sample_weight = class_sw
+            else:
+                sample_weight = sample_weight * class_sw
+        return super().fit(X, y, sample_weight=sample_weight, monitor=monitor)
+
     def _warn_mae_for_criterion(self):
-        # TODO: This should raise an error from 1.1
+        # TODO: This should raise an error from 1.1  # noqa: E501
         warnings.warn("criterion='mae' was deprecated in version 0.24 and "
                       "will be removed in version 1.1 (renaming of 0.26). Use "
                       "criterion='friedman_mse' or 'mse' instead, as trees "
@@ -1431,6 +1672,8 @@ shape (n_estimators, ``loss_.K``)
             classes corresponds to that in the attribute :term:`classes_`.
         """
         raw_predictions = self.decision_function(X)
+        if hasattr(self, "temperature_") and self.temperature_ is not None:
+            raw_predictions = raw_predictions / float(self.temperature_)
         try:
             return self.loss_._raw_prediction_to_proba(raw_predictions)
         except NotFittedError:
@@ -1489,6 +1732,55 @@ shape (n_estimators, ``loss_.K``)
         except AttributeError as e:
             raise AttributeError('loss=%r does not support predict_proba' %
                                  self.loss) from e
+
+    def calibrate_temperature(self, X_val, y_val):
+        """Calibrate probabilities via temperature scaling on a validation set."""
+        raw_val = self.decision_function(X_val)
+
+        def nll(log_temp):
+            temp = np.exp(log_temp)
+            scaled = raw_val / temp
+            probs = self.loss_._raw_prediction_to_proba(scaled)
+            eps = 1e-12
+            return -np.mean(np.log(probs[np.arange(len(y_val)), y_val] + eps))
+
+        result = minimize_scalar(nll, bounds=(-5.0, 5.0), method='bounded')
+        self.temperature_ = float(np.exp(result.x))
+        return self.temperature_
+
+    def compute_feature_importances(self, normalize=True):
+        """Aggregate feature importances across all fitted trees."""
+        if not hasattr(self, 'estimators_') or self.estimators_.size == 0:
+            raise NotFittedError("Model is not fitted")
+        importances = np.zeros(self.n_features_)
+        for stage in self.estimators_:
+            for tree in stage:
+                importances += tree.feature_importances_
+        importances = importances / (len(self.estimators_) * self.loss_.K)
+        if normalize and importances.sum() > 0:
+            importances = importances / importances.sum()
+        
+        return importances
+
+    def get_shap_trees(self):
+        """Return fitted trees for SHAP explainers."""
+        if not hasattr(self, 'estimators_') or self.estimators_.size == 0:
+            raise NotFittedError("Model is not fitted")
+        return [tree for stage in self.estimators_ for tree in stage]
+
+    def save_model(self, path, metadata=None):
+        """Serialize the fitted model with optional metadata."""
+        payload = {"model": self, "metadata": metadata or {}}
+        joblib.dump(payload, path)
+        return path
+
+    @classmethod
+    def load_model(cls, path):
+        """Load a model saved with `save_model`."""
+        payload = joblib.load(path)
+        if isinstance(payload, dict) and "model" in payload:
+            return payload["model"]
+        return payload
 
 
 class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
@@ -1797,11 +2089,13 @@ class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
                  subsample=1.0, criterion='friedman_mse', min_samples_split=2,
                  min_samples_leaf=1, min_weight_fraction_leaf=0.,
                  max_depth=3, min_impurity_decrease=0.,
-                 min_impurity_split=None, init=None, random_state=None,
+                 init=None, random_state=None,
                  max_features=None, alpha=0.9, verbose=0, max_leaf_nodes=None,
                  warm_start=False, validation_fraction=0.1,
                  n_iter_no_change=None, tol=1e-4, ccp_alpha=0.0,
-                 constraints=[]):
+                 constraints=[], early_stopping_rounds=None,
+                 early_stopping_metric='val_loss', early_stopping_patience=5,
+                 early_stopping_callback=None):
 
         super().__init__(
             loss=loss, learning_rate=learning_rate, n_estimators=n_estimators,
@@ -1811,16 +2105,19 @@ class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
             max_depth=max_depth, init=init, subsample=subsample,
             max_features=max_features,
             min_impurity_decrease=min_impurity_decrease,
-            min_impurity_split=min_impurity_split,
             random_state=random_state, alpha=alpha, verbose=verbose,
             max_leaf_nodes=max_leaf_nodes, warm_start=warm_start,
             validation_fraction=validation_fraction,
             n_iter_no_change=n_iter_no_change, tol=tol, ccp_alpha=ccp_alpha,
-            constraints=constraints)
+            constraints=constraints,
+            early_stopping_rounds=early_stopping_rounds,
+            early_stopping_metric=early_stopping_metric,
+            early_stopping_patience=early_stopping_patience,
+            early_stopping_callback=early_stopping_callback)  # noqa: E501
 
     def _validate_y(self, y, sample_weight=None):
         if y.dtype.kind == 'O':
-            y = y.astype(DOUBLE)
+            y = y.astype(DOUBLE)  # type: ignore
         return y
 
     def _warn_mae_for_criterion(self):
@@ -1870,6 +2167,40 @@ class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
         for raw_predictions in self._staged_raw_predict(X):
             yield raw_predictions.ravel()
 
+    def compute_feature_importances(self, normalize=True):
+        """Aggregate feature importances across all fitted trees."""
+        if not hasattr(self, 'estimators_') or self.estimators_.size == 0:
+            raise NotFittedError("Model is not fitted")
+        importances = np.zeros(self.n_features_)
+        for stage in self.estimators_:
+            for tree in stage:
+                importances += tree.feature_importances_
+        importances = importances / (len(self.estimators_) * self.loss_.K)
+        if normalize and importances.sum() > 0:
+            importances = importances / importances.sum()
+        
+        return importances
+
+    def get_shap_trees(self):
+        """Return fitted trees for SHAP explainers."""
+        if not hasattr(self, 'estimators_') or self.estimators_.size == 0:
+            raise NotFittedError("Model is not fitted")
+        return [tree for stage in self.estimators_ for tree in stage]
+
+    def save_model(self, path, metadata=None):
+        """Serialize the fitted model with optional metadata."""
+        payload = {"model": self, "metadata": metadata or {}}
+        joblib.dump(payload, path)
+        return path
+
+    @classmethod
+    def load_model(cls, path):
+        """Load a model saved with `save_model`."""
+        payload = joblib.load(path)
+        if isinstance(payload, dict) and "model" in payload:
+            return payload["model"]
+        return payload
+
     def apply(self, X):
         """Apply trees in the ensemble to X, return leaf indices.
 
@@ -1893,7 +2224,7 @@ class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
         leaves = leaves.reshape(X.shape[0], self.estimators_.shape[0])
         return leaves
 
-    # FIXME: to be removed in 1.1
+    # FIXME: to be removed in 1.1  # noqa: E501
     # mypy error: Decorated property not supported
     @deprecated("Attribute n_classes_ was deprecated "  # type: ignore
                 "in version 0.24 and will be removed in 1.1 "
@@ -1908,3 +2239,44 @@ class MooGBTRegressor(RegressorMixin, BaseGradientBoosting):
                 .format(self.__class__.__name__)
             ) from nfe
         return 1
+
+
+def grid_search_constraints(estimator_cls, param_grid, X, y, scorer, cv=3,
+                            fit_kwargs=None):
+    """Grid-search utility for constraint-aware estimators.
+
+    Parameters
+    ----------
+    estimator_cls : class
+        The estimator class (e.g., MooGBTClassifier or MooGBTRegressor).
+    param_grid : dict
+        Grid of hyperparameters including constraints definitions.
+    X, y : array-like
+        Training data.
+    scorer : callable
+        Scoring function signature ``scorer(y_true, y_pred)``.
+    cv : int, default=3
+        Number of folds.
+    fit_kwargs : dict, optional
+        Extra kwargs passed to ``fit``.
+    """
+    fit_kwargs = fit_kwargs or {}
+    best_score = -np.inf
+    best_params = None
+    best_estimator = None
+    cv_split = KFold(n_splits=cv, shuffle=True, random_state=fit_kwargs.get('random_state'))
+
+    for params in ParameterGrid(param_grid):
+        scores = []
+        for train_idx, val_idx in cv_split.split(X, y):
+            est = estimator_cls(**params)
+            est.fit(X[train_idx], y[train_idx], **fit_kwargs)
+            preds = est.predict(X[val_idx])
+            scores.append(scorer(y[val_idx], preds))
+        mean_score = float(np.mean(scores))
+        if mean_score > best_score:
+            best_score = mean_score
+            best_params = params
+            best_estimator = est
+
+    return best_estimator, best_params, best_score

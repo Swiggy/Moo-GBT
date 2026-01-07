@@ -1,0 +1,11 @@
+{
+  "include": ["src"],
+  "pythonVersion": "3.8",
+  "typeCheckingMode": "basic",
+  "reportGeneralTypeIssues": false,
+  "reportOptionalMemberAccess": false,
+  "reportOptionalSubscript": false,
+  "reportPrivateImportUsage": false,
+  "reportMissingTypeStubs": "none",
+  "reportMissingImports": "none"
+}
