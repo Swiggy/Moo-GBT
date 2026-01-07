@@ -853,13 +853,14 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
                             break
 
             # Mixed-objective training history
+            oob_impr = self.oob_improvement_[i] if do_oob else None
             history_entry = {
                 "iter": i,
                 "train_loss": float(self.train_score_[i]),
             }
             if val_loss is not None:
                 history_entry["val_loss"] = float(val_loss)
-            if do_oob:
+            if do_oob and oob_impr is not None:
                 history_entry["oob_improvement"] = float(oob_impr)
             self.history_.append(history_entry)
 
@@ -871,7 +872,7 @@ class BaseGradientBoosting(BaseEnsemble, metaclass=ABCMeta):
             elif self.early_stopping_metric == 'train_loss':
                 metric_value = self.train_score_[i]
             elif self.early_stopping_metric == 'oob_improvement':
-                metric_value = oob_impr
+                metric_value = oob_impr if oob_impr is not None else None
                 maximize_metric = True
 
             if metric_value is not None and self.early_stopping_patience is not None:
