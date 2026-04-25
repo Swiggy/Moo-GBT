@@ -54,13 +54,13 @@ Here `y_train`  contains 2 columns, the first column should be the primary objec
 
 ## Usage Steps
 <ol>
-	<li> Run unconstrained GBT on Primary Objective. Unconstrained GBT is just the GBTClassifer/GBTRegressor by scikit-learn </li>
+	<li> Run unconstrained GBT on Primary Objective. Unconstrained GBT is just the GBTClassifier/GBTRegressor by scikit-learn </li>
 	<li> Calculate the loss function value for Primary Objective and sub-objective(s)</li>
 		<ul>
 			<li>For MooGBTClassifier calculate Log Loss between predicted probability and sub-objective label(s) </li>
 			<li>For MooGBTRegressor calculate mean squared error between predicted value and sub-objective label(s) </li>
 		</ul>
-	<li> Set the value of hyperparamter b, less than the calculated cost in the previous step and run MooGBTClassifer/MooGBTRegressor with this b. The lower the value of b, the more the sub-objective will be optimized </li>
+	<li> Set the value of hyperparameter b, less than the calculated cost in the previous step and run MooGBTClassifier/MooGBTRegressor with this b. The lower the value of b, the more the sub-objective will be optimized </li>
 </ol>
 
 <br>
